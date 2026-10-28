@@ -54,7 +54,7 @@
   .ctx mark { background:#ffe46b; color:#1c2430; padding:0 2px; border-radius:2px; }
   .opts { margin-bottom:8px; }
   .opt { display:flex; align-items:center; flex-wrap:wrap; gap:6px; margin:0 0 4px; color:var(--ink); font-size:.95rem; }
-  .opt input[type=radio] { width:auto; margin:0; }
+  .opt input[type=radio], .opt input[type=checkbox] { width:auto; margin:0; }
   .opt input.custom { flex:1; min-width:150px; margin:0; }
   .sug-actions { display:flex; gap:8px; align-items:center; }
   .seg.on { background:var(--accent); border-color:var(--accent); color:var(--on-accent); }
@@ -1293,8 +1293,8 @@ const TXOUT = (() => {
     return t || "";
   }
   function isMarked(it) {
+    if (it.type === "insert" && it.mode === "pdf" && it.pdfBytes) return true;   // an uploaded PDF goes in whatever the buttons say
     if (it.status !== "accept") return false;
-    if (it.type === "insert" && it.mode === "pdf") return !!it.pdfBytes;
     return it.type === "insert" && it.mode === "cross" ? true : !!textOf(it);
   }
 
@@ -2335,7 +2335,7 @@ const TUI = (() => {
       const other = `<label class="opt"><input type="radio" name="c${it.id}" data-act="choice" value="-1"${it.choice === -1 ? " checked" : ""}> ${it.options.length ? "Other:" : (it.type === "acronym" ? "Not in the list. Type what it stands for:" : "Type the correct spelling:")}
         <input type="text" class="custom" data-act="custom" value="${esc(it.custom)}" placeholder="${it.type === "acronym" ? "Full name" : "Correction"}"></label>`;
       const cross = it.type === "acronym"
-        ? `<label class="opt"><input type="checkbox" data-act="replace"${it.replace ? " checked" : ""}> Cross out the acronym and write this above it (otherwise it is added after the acronym)</label>` : "";
+        ? `<label class="opt"><input type="checkbox" data-act="replace"${it.replace ? " checked" : ""}> Cross out original</label>` : "";
       body = `<div class="opts">${opts}${other}${cross}</div>`;
     } else {
       body = `<div class="opts">
@@ -2459,7 +2459,7 @@ const TUI = (() => {
     if (act === "replace" && e.type === "change") { it.replace = el.checked; return; }
     if (e.type !== "click" && e.type !== "change") return;
     if (e.type === "click" && el.tagName === "INPUT") return;
-    if (act === "accept" || act === "deny") setStatus(card, it, act);
+    if (act === "accept" || act === "deny") setStatus(card, it, it.type === "insert" && it.mode === "pdf" && it.pdfBytes ? "accept" : act);   // an uploaded PDF is always merged in
     else if (act === "page") showPage(card, it);
     else if (act === "choice" && e.type === "change") {
       it.choice = +el.value;
