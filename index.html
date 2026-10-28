@@ -44,6 +44,7 @@
   .drop input { display:none; }
   .drop b { display:block; font-size:1.05rem; margin-bottom:4px; }
   #t-progress { margin-top:12px; color:var(--muted); }
+  .opt .link.rm { margin-left:4px; padding:2px 4px; }
   .pdfname.bad { color:var(--err); font-weight:600; }
   .err { margin-top:12px; padding:10px 12px; border:1px solid var(--err); color:var(--err); border-radius:6px; }
   .sug { background:var(--card); border:1px solid var(--line); border-left-width:5px; border-radius:8px; padding:12px; margin-bottom:12px; }
@@ -2341,7 +2342,8 @@ const TUI = (() => {
       body = `<div class="opts">
         <label class="opt"><input type="radio" name="c${it.id}" data-act="mode" value="cross"${it.mode === "cross" ? " checked" : ""}> Cross out</label>
         <label class="opt"><input type="radio" name="c${it.id}" data-act="mode" value="pdf"${it.mode === "pdf" ? " checked" : ""}> Insert a PDF here:
-          <input type="file" class="pdfpick" data-act="pdf" accept="application/pdf,.pdf"> <span class="pdfname">${it.pdfBytes ? esc(it.pdfName) + " (" + it.pdfPages + " page" + (it.pdfPages === 1 ? "" : "s") + ")" : ""}</span></label>
+          <input type="file" class="pdfpick" data-act="pdf" accept="application/pdf,.pdf"> <span class="pdfname">${it.pdfBytes ? esc(it.pdfName) + " (" + it.pdfPages + " page" + (it.pdfPages === 1 ? "" : "s") + ")" : ""}</span>
+          <button type="button" class="link rm" data-act="removepdf"${it.pdfBytes ? "" : " hidden"}>Remove file</button></label>
         <label class="opt"><input type="radio" name="c${it.id}" data-act="mode" value="title"${it.mode === "title" ? " checked" : ""}> Insert title:
           <input type="text" class="custom" data-act="title" value="${esc(it.title)}" placeholder="What is the insert?"></label></div>`;
     }
@@ -2436,6 +2438,7 @@ const TUI = (() => {
       Object.assign(it, { pdfBytes: r.bytes, pdfName: file.name, pdfPages: r.pages, mode: "pdf" });
       label.textContent = `${file.name} (${r.pages} page${r.pages === 1 ? "" : "s"}${r.converted ? ", added as page images" : ""})`;
       card.querySelector(`input[value="pdf"]`).checked = true;
+      card.querySelector(".rm").hidden = false;
       setStatus(card, it, "accept");
     } catch (err) {
       input.value = "";
@@ -2444,6 +2447,16 @@ const TUI = (() => {
       label.textContent = "That file could not be read as a PDF (it may be password-protected). Nothing was added.";
       if (it.mode === "pdf") setStatus(card, it, "pending");
     }
+  }
+
+  function removePdf(card, it) {
+    Object.assign(it, { pdfBytes: null, pdfName: "", pdfPages: 0, mode: "cross" });
+    card.querySelector(".pdfpick").value = "";
+    const label = card.querySelector(".pdfname");
+    label.className = "pdfname"; label.textContent = "";
+    card.querySelector(".rm").hidden = true;
+    card.querySelector(`input[value="cross"]`).checked = true;
+    setStatus(card, it, "pending");
   }
 
   function onListEvent(e) {
@@ -2459,6 +2472,7 @@ const TUI = (() => {
     if (act === "replace" && e.type === "change") { it.replace = el.checked; return; }
     if (e.type !== "click" && e.type !== "change") return;
     if (e.type === "click" && el.tagName === "INPUT") return;
+    if (act === "removepdf") { removePdf(card, it); return; }
     if (act === "accept" || act === "deny") setStatus(card, it, it.type === "insert" && it.mode === "pdf" && it.pdfBytes ? "accept" : act);   // an uploaded PDF is always merged in
     else if (act === "page") showPage(card, it);
     else if (act === "choice" && e.type === "change") {
