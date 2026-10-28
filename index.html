@@ -44,6 +44,7 @@
   .drop input { display:none; }
   .drop b { display:block; font-size:1.05rem; margin-bottom:4px; }
   #t-progress { margin-top:12px; color:var(--muted); }
+  .pdfname.bad { color:var(--err); font-weight:600; }
   .err { margin-top:12px; padding:10px 12px; border:1px solid var(--err); color:var(--err); border-radius:6px; }
   .sug { background:var(--card); border:1px solid var(--line); border-left-width:5px; border-radius:8px; padding:12px; margin-bottom:12px; }
   .sug.accept { border-left-color:var(--ok); } .sug.pending { border-left-color:#d19a00; } .sug.deny { border-left-color:var(--muted); opacity:.75; }
@@ -1327,9 +1328,9 @@ const TXOUT = (() => {
       for (const it of list) {
         const first = it.parts[0], text = clean(textOf(it));
         if (it.type === "acronym") {
-          // "U.S." / "DC" / "CYBERCOM" are replaced by the full name: struck through, name above, caret over the struck word.
-          // Any other acronym stays and the name is added after it: caret over the space after the acronym.
-          const replaces = /^(United States|District of Columbia)\b/.test(text);
+          // By default the acronym stays and the name is added after it: caret over the space after the acronym.
+          // If the reviewer ticked "cross out", the acronym is struck through, name above, caret over the struck word.
+          const replaces = !!it.replace;
           if (replaces) line(first.x0 - 1, first.y + 3.6, first.x1 + 1, first.y + 3.9, 1.1);
           const cx = replaces ? (first.x0 + first.x1) / 2 : first.x1 + 3.9;
           pg.drawText(">", { x: cx - 3.1, y: first.y + 15, size: 9, font, color: RED, rotate: degrees(-90) });
@@ -2333,7 +2334,9 @@ const TUI = (() => {
         `<label class="opt"><input type="radio" name="c${it.id}" data-act="choice" value="${i}"${it.choice === i ? " checked" : ""}> ${esc(o)}</label>`).join("");
       const other = `<label class="opt"><input type="radio" name="c${it.id}" data-act="choice" value="-1"${it.choice === -1 ? " checked" : ""}> ${it.options.length ? "Other:" : (it.type === "acronym" ? "Not in the list. Type what it stands for:" : "Type the correct spelling:")}
         <input type="text" class="custom" data-act="custom" value="${esc(it.custom)}" placeholder="${it.type === "acronym" ? "Full name" : "Correction"}"></label>`;
-      body = `<div class="opts">${opts}${other}</div>`;
+      const cross = it.type === "acronym"
+        ? `<label class="opt"><input type="checkbox" data-act="replace"${it.replace ? " checked" : ""}> Cross out the acronym and write this above it (otherwise it is added after the acronym)</label>` : "";
+      body = `<div class="opts">${opts}${other}${cross}</div>`;
     } else {
       body = `<div class="opts">
         <label class="opt"><input type="radio" name="c${it.id}" data-act="mode" value="cross"${it.mode === "cross" ? " checked" : ""}> Cross out</label>
@@ -2398,19 +2401,48 @@ const TUI = (() => {
     pane.dataset.drawn = "1";
   }
 
+  // Pages are copied into the transcript with pdf-lib; if a PDF can't be copied that way (odd structure, restrictions),
+  // each page is drawn to an image with pdf.js and rebuilt as a plain PDF, so any PDF a browser can show still goes in.
+  async function usablePdf(bytes) {
+    try {
+      const src = await PDFLib.PDFDocument.load(bytes, { ignoreEncryption: true, updateMetadata: false });
+      const probe = await PDFLib.PDFDocument.create();
+      await probe.copyPages(src, src.getPageIndices());
+      return { bytes, pages: src.getPageCount(), converted: false };
+    } catch (e) { /* fall through to the image route */ }
+    const pdf = await pdfjs().getDocument({ data: bytes.slice() }).promise;
+    const out = await PDFLib.PDFDocument.create();
+    for (let n = 1; n <= pdf.numPages; n++) {
+      const page = await pdf.getPage(n);
+      const view = page.getViewport({ scale: 2 });
+      const cv = document.createElement("canvas");
+      cv.width = view.width; cv.height = view.height;
+      await page.render({ canvasContext: cv.getContext("2d"), viewport: view }).promise;
+      const jpg = await new Promise((r) => cv.toBlob(r, "image/jpeg", 0.88)).then((bl) => bl.arrayBuffer());
+      const img = await out.embedJpg(jpg);
+      const base = page.getViewport({ scale: 1 });
+      out.addPage([base.width, base.height]).drawImage(img, { x: 0, y: 0, width: base.width, height: base.height });
+    }
+    return { bytes: await out.save(), pages: pdf.numPages, converted: true };
+  }
+
   async function attachPdf(card, it, input) {
     const file = input.files[0], label = card.querySelector(".pdfname");
     if (!file) return;
+    label.className = "pdfname";
+    label.textContent = "Reading...";
     try {
-      const bytes = new Uint8Array(await file.arrayBuffer());
-      const doc = await PDFLib.PDFDocument.load(bytes, { ignoreEncryption: true });
-      Object.assign(it, { pdfBytes: bytes, pdfName: file.name, pdfPages: doc.getPageCount(), mode: "pdf" });
-      label.textContent = `${file.name} (${it.pdfPages} page${it.pdfPages === 1 ? "" : "s"})`;
+      const r = await usablePdf(new Uint8Array(await file.arrayBuffer()));
+      Object.assign(it, { pdfBytes: r.bytes, pdfName: file.name, pdfPages: r.pages, mode: "pdf" });
+      label.textContent = `${file.name} (${r.pages} page${r.pages === 1 ? "" : "s"}${r.converted ? ", added as page images" : ""})`;
       card.querySelector(`input[value="pdf"]`).checked = true;
       setStatus(card, it, "accept");
     } catch (err) {
       input.value = "";
-      label.textContent = "That file could not be read as a PDF.";
+      it.pdfBytes = null;
+      label.className = "pdfname bad";
+      label.textContent = "That file could not be read as a PDF (it may be password-protected). Nothing was added.";
+      if (it.mode === "pdf") setStatus(card, it, "pending");
     }
   }
 
@@ -2424,6 +2456,7 @@ const TUI = (() => {
       return;
     }
     if (act === "pdf" && e.type === "change") { attachPdf(card, it, el); return; }
+    if (act === "replace" && e.type === "change") { it.replace = el.checked; return; }
     if (e.type !== "click" && e.type !== "change") return;
     if (e.type === "click" && el.tagName === "INPUT") return;
     if (act === "accept" || act === "deny") setStatus(card, it, act);
@@ -2466,7 +2499,7 @@ const TUI = (() => {
     t$("t-finish").textContent = "Create marked-up PDF";
   }
 
-  function showMessageT(text) { const m = t$("t-review-error"); m.textContent = text; m.hidden = !text; }
+  function showMessageT(text) { const m = t$("t-review-error"); m.textContent = text; m.hidden = !text; if (text) m.scrollIntoView({ block: "center" }); }
 
   async function preview() {
     const box = t$("t-preview");
