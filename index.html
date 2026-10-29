@@ -1769,7 +1769,7 @@ const TX = (() => {
       const shown = sentenceStart ? word[0].toUpperCase() + word.slice(1) : word;
       out.push({
         type: "number", token: tok, parts: locate(stream, i, end), context: snippet(stream, i, end),
-        options: [shown], known: true, status: "accept", choice: 0, custom: "",
+        options: [shown], known: true, status: "pending", choice: 0, custom: "",   // never changed without a human decision
       });
     }
     return out;
